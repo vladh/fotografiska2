@@ -90,7 +90,7 @@ func getExifCreationTime(path string) (time.Time, error) {
 	}
 
 	if offsetStr == "" {
-		fmt.Printf("[%s] WARNING: Got DateTimeOriginal but no OffsetTimeOriginal, time will be UTC", path)
+		fmt.Printf("\tWARNING: Got DateTimeOriginal but no OffsetTimeOriginal, time will be UTC\n")
 		return time.Parse("2006:01:02 15:04:05", dtStr)
 	} else {
 		return time.Parse("2006:01:02 15:04:05-07:00", dtStr + offsetStr)
@@ -123,7 +123,7 @@ func getPhotoHash(path string) string {
 	nBytesRead, err := file.Read(bytes)
 	if err != nil || nBytesRead == 0 { panic(err) }
 	sum := xxhash.Sum64(bytes)
-	hash := fmt.Sprintf("%x", sum)
+	hash := fmt.Sprintf("%.16x", sum)
 	return hash
 }
 
@@ -190,7 +190,7 @@ func validateFile(path string) bool {
 	}
 	hash := parts[1]
 	if len(hash) != 16 {
-		panic(fmt.Sprintf("Expected the following to be a length 16 hash but it wasn't: %s", hash))
+		panic(fmt.Sprintf("Expected the following to be a length 16 hash but it wasn't: %s\nFull path was: %s", hash, path))
 	}
 	correctHash := getPhotoHash(path)
 	return hash == correctHash
