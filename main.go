@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -70,11 +71,16 @@ func getPhotoCreationTime(path string) (time.Time, error) {
 
 
 func main() {
-	path := "/home/vladh/scratch/imgsrc/IMG_1520.jpg"
-
-	t, err := getPhotoCreationTime(path)
+	srcdir := "/home/vladh/scratch/imgsrc/*"
+	paths, err := filepath.Glob(srcdir)
 	if err != nil { panic(err) }
 
-	fmt.Printf("Creation time: %+v\n", t)
+	for _, path := range paths {
+		fmt.Printf("File: %+v\n", path)
+		t, err := getPhotoCreationTime(path)
+		if err != nil { panic(err) }
+
+		fmt.Printf("Creation time: %+v\n", t)
+	}
 }
 
