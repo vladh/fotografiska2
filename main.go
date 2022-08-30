@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,45 @@ import (
 
 
 const MAX_HASHABLE_SIZE_IN_BYTES = 10485760 // 10 MB
+const USAGE = `
+fotografiska organises your photos/videos into a certain directory structure that is easy
+to browse with a regular file manager.
+
+Your photos/videos should be in a single folder (files in nested folders won't be used).
+They will be organised into subfolders by year and month, and their filename will start
+with the date they were taken, as well as including a unique hash of (part of) the file.
+
+Here's an example. Let's say your files look like this:
+
+	DSCF4325.JPG (taken 2021/01/01 05:23:11)
+	DSCF1234.JPG (taken 2020/08/27 11:00:00)
+
+You can run a command such as the following:
+
+	fotografiska -srcDir ~/Downloads/photos -dstDir ~/Pictures
+
+Your files will then be organised as follows:
+
+	2020/
+		02/
+			2020.08.27_11.00.00_b46976ab6907346a_DSCF1234.JPG
+	2021/
+		01/
+			2020.01.01-05.23.11_66f4c6bbab77a615_DSCF4325.JPG
+
+The creation date and time will be taken from the EXIF data. When no EXIF data is
+available, such as with videos, the file's modification time will be used.
+
+Caveats:
+
+1. Please note that if your photo/video has no EXIF data, and you've e.g. made a copy of
+the file so its modification time is not the time it was taken, fotografiska cannot
+correctly organise your photos into correct dates and times.
+
+2. Always make a backup of your photos/videos before using fotografiska. It's been
+reasonably tested, but you probably don't want to lose your photos, so copy them to a
+separate folder first just to be safe.
+`;
 
 
 func getExifCreationTime(path string) (time.Time, error) {
@@ -160,19 +200,38 @@ func sortFileIntoDestination(path string, dstBaseDir string, dryRun bool) {
 
 
 func main() {
-	srcDir := "/home/vladh/scratch/imgsrc"
-	dstBaseDir := "/home/vladh/scratch/imgdst"
-	dryRun := false
+	srcDirArg := flag.String("srcDir", "", "a folder containing images/videos to read (mandatory)")
+	dstDirArg := flag.String("dstDir", "", "a folder to move the images/videos into (mandatory)")
+	dryRunArg := flag.Bool("dryRun", false, "if true, don't actually move any files, just print out what would be done")
+	flag.Usage = func() {
+		w := flag.CommandLine.Output()
+		fmt.Fprintf(w, "%s [options]\n\n", os.Args[0])
+		fmt.Fprintf(w, "Options:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(w, USAGE)
+	}
+	flag.Parse()
 
-	srcDir = validateDir(srcDir)
-	dstBaseDir = validateDir(dstBaseDir)
+	if *srcDirArg == "" {
+		fmt.Fprintf(os.Stderr, "ERROR: Please specify a source directory\n\n")
+		flag.Usage()
+		os.Exit(1)
+	}
+	if *dstDirArg == "" {
+		fmt.Fprintf(os.Stderr, "ERROR: Please specify a destination directory\n\n")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	srcDir := validateDir(*srcDirArg)
+	dstBaseDir := validateDir(*dstDirArg)
 
 	paths, err := filepath.Glob(srcDir + "*")
 	if err != nil { panic(err) }
 
 	for idx, path := range paths {
 		fmt.Printf("[%.2d/%.2d] %s\n", idx + 1, len(paths), filepath.Base(path))
-		sortFileIntoDestination(path, dstBaseDir, dryRun)
+		sortFileIntoDestination(path, dstBaseDir, *dryRunArg)
 	}
 }
 
