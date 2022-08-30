@@ -183,13 +183,39 @@ func copyFile(srcPath string, dstPath string) int64 {
 }
 
 
+func validateFile(path string) bool {
+	parts := strings.Split(filepath.Base(path), "-")
+	if len(parts) < 3 {
+		panic(fmt.Sprintf("Expected filename to split by '-' into at least 3 parts, but found %d parts: %s", len(parts), path))
+	}
+	hash := parts[1]
+	if len(hash) != 16 {
+		panic(fmt.Sprintf("Expected the following to be a length 16 hash but it wasn't: %s", hash))
+	}
+	correctHash := getPhotoHash(path)
+	return hash == correctHash
+}
+
+
 func sortFileIntoDestination(path string, dstBaseDir string, dryRun bool) {
 	dstPath := getSortedDestination(path, dstBaseDir)
 	makeDestinationDirs(dstPath)
 
+	shouldWriteFile := false
 	if _, err := os.Stat(dstPath); err == nil {
-		fmt.Printf("\tFile already exists, doing nothing: %s\n", dstPath)
+		if validateFile(dstPath) {
+			fmt.Printf("\tDestination file already exists, doing nothing: %s\n", dstPath)
+		} else {
+			fmt.Printf("\tDestination file already exists but did not match its own hash, deleting\n")
+			err := os.Remove(dstPath)
+			if err != nil { panic(err) }
+			shouldWriteFile = true
+		}
 	} else {
+		shouldWriteFile = true
+	}
+
+	if shouldWriteFile {
 		var bytesCopied int64 = 0
 		if !dryRun {
 			bytesCopied = copyFile(path, dstPath)
