@@ -2,22 +2,27 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
-	"io/ioutil"
-
 	"github.com/dsoprea/go-exif/v3"
+	"github.com/cespare/xxhash"
 )
+
+
+const MAX_HASHABLE_SIZE_IN_BYTES = 10485760 // 10 MB
 
 
 func getExifCreationTime(path string) (time.Time, error) {
 	f, err := os.Open(path)
+	defer f.Close()
 	if err != nil { panic(err) }
 
-	data, err := ioutil.ReadAll(f)
+	data, err := io.ReadAll(f)
 	if err != nil { panic(err) }
 
 	rawExif, err := exif.SearchAndExtractExif(data)
@@ -31,24 +36,24 @@ func getExifCreationTime(path string) (time.Time, error) {
 	entries, _, err := exif.GetFlatExifData(rawExif, nil)
 	if err != nil { panic(err) }
 
-	var dt_str, offset_str string
+	var dtStr, offsetStr string
 	for _, entry := range entries {
 		if entry.TagName == "DateTimeOriginal" {
-			dt_str = entry.Formatted
+			dtStr = entry.Formatted
 		}
 		if entry.TagName == "OffsetTimeOriginal" {
-			offset_str = entry.Formatted
+			offsetStr = entry.Formatted
 		}
 	}
-	if dt_str == "" {
+	if dtStr == "" {
 		return time.Time{}, fmt.Errorf("[%s] No DateTimeOriginal tag in EXIF data, perhaps it is named differently?", path)
 	}
 
-	if offset_str == "" {
+	if offsetStr == "" {
 		fmt.Printf("[%s] WARNING: Got DateTimeOriginal but no OffsetTimeOriginal, time will be UTC", path)
-		return time.Parse("2006:01:02 15:04:05", dt_str)
+		return time.Parse("2006:01:02 15:04:05", dtStr)
 	} else {
-		return time.Parse("2006:01:02 15:04:05-07:00", dt_str + offset_str)
+		return time.Parse("2006:01:02 15:04:05-07:00", dtStr + offsetStr)
 	}
 }
 
@@ -70,17 +75,104 @@ func getPhotoCreationTime(path string) (time.Time, error) {
 }
 
 
-func main() {
-	srcdir := "/home/vladh/scratch/imgsrc/*"
-	paths, err := filepath.Glob(srcdir)
+func getPhotoHash(path string) string {
+	file, err := os.Open(path)
+	defer file.Close()
+	if err != nil { panic(err) }
+	bytes := make([]byte, MAX_HASHABLE_SIZE_IN_BYTES)
+	nBytesRead, err := file.Read(bytes)
+	if err != nil || nBytesRead == 0 { panic(err) }
+	sum := xxhash.Sum64(bytes)
+	hash := fmt.Sprintf("%x", sum)
+	return hash
+}
+
+
+func getSortedDestination(path string, dstBaseDir string) string {
+	t, err := getPhotoCreationTime(path)
 	if err != nil { panic(err) }
 
-	for _, path := range paths {
-		fmt.Printf("File: %+v\n", path)
-		t, err := getPhotoCreationTime(path)
-		if err != nil { panic(err) }
+	hash := getPhotoHash(path)
 
-		fmt.Printf("Creation time: %+v\n", t)
+	filename := filepath.Base(path)
+
+	dstPath := fmt.Sprintf("%s%d/%.2d/%s-%s-%s",
+		dstBaseDir, t.Year(), t.Month(),
+		t.Format("2006.01.02_15.04.05"),
+		hash,
+		filename)
+
+	return dstPath
+}
+
+
+func makeDestinationDirs(path string) {
+	dir := filepath.Dir(path)
+	os.MkdirAll(dir, os.ModePerm)
+}
+
+
+func validateDir(dirPath string) string {
+	if !strings.HasSuffix(dirPath, "/") {
+		dirPath += "/"
+	}
+
+	dirinfo, err := os.Stat(dirPath)
+	if err != nil { panic(err) }
+	if !dirinfo.IsDir() {
+		fmt.Errorf("Expected this to be a directory, but it wasn't: %s", dirPath)
+	}
+
+	return dirPath
+}
+
+
+func copyFile(srcPath string, dstPath string) int64 {
+	srcFile, err := os.Open(srcPath)
+	if err != nil { panic(err) }
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dstPath)
+	if err != nil { panic(err) }
+	defer dstFile.Close()
+
+	bytesCopied, err := io.Copy(dstFile, srcFile)
+	if err != nil { panic(err) }
+
+	return bytesCopied
+}
+
+
+func sortFileIntoDestination(path string, dstBaseDir string, dryRun bool) {
+	dstPath := getSortedDestination(path, dstBaseDir)
+	makeDestinationDirs(dstPath)
+
+	if _, err := os.Stat(dstPath); err == nil {
+		fmt.Printf("\tFile already exists, doing nothing: %s\n", dstPath)
+	} else {
+		var bytesCopied int64 = 0
+		if !dryRun {
+			bytesCopied = copyFile(path, dstPath)
+		}
+		fmt.Printf("\t→ %s (%d bytes copied)\n", dstPath, bytesCopied)
+	}
+}
+
+
+func main() {
+	srcDir := "/home/vladh/scratch/imgsrc"
+	dstBaseDir := "/home/vladh/scratch/imgdst"
+	dryRun := false
+
+	srcDir = validateDir(srcDir)
+	dstBaseDir = validateDir(dstBaseDir)
+
+	paths, err := filepath.Glob(srcDir + "*")
+	if err != nil { panic(err) }
+
+	for idx, path := range paths {
+		fmt.Printf("[%.2d/%.2d] %s\n", idx + 1, len(paths), filepath.Base(path))
+		sortFileIntoDestination(path, dstBaseDir, dryRun)
 	}
 }
 
