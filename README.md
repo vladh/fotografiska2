@@ -3,7 +3,7 @@
 SPDX-License-Identifier: blessing
 -->
 
-![pstr string functions](images/character_bouhan_camera_sm1.png)
+![A cartoon illustration of a camera](images/character_bouhan_camera_sm1.png)
 
 # fotografiska
 
