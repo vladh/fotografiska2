@@ -1,3 +1,6 @@
+// © 2022 Vlad-Stefan Harbuz <vlad@vladh.net>
+// SPDX-License-Identifier: blessing
+
 module vladh.net/fotografiska2
 
 go 1.19
