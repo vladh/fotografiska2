@@ -17,17 +17,20 @@ import (
 
 const MAX_HASHABLE_SIZE_IN_BYTES = 10485760 // 10 MB
 const USAGE = `
-fotografiska organises your photos/videos into a certain directory structure that is easy
-to browse with a regular file manager.
+fotografiska organises your photos/videos into a certain directory structure
+that is easy to browse with a regular file manager.
 
-Your photos/videos should be in a single folder (files in nested folders won't be used).
-They will be organised into subfolders by year and month, and their filename will start
-with the date they were taken, as well as including a unique hash of (part of) the file.
+Your photos/videos will be organised into subfolders by year and month, and
+their filename will start with the date they were taken and also include a
+unique hash of the file.
+
+If the file is larger than 10MB, the hash will only be computed using the first
+10MB of the file.
 
 Here's an example. Let's say your files look like this:
 
-	DSCF4325.JPG (taken 2021/01/01 05:23:11)
-	DSCF1234.JPG (taken 2020/08/27 11:00:00)
+	DSCF4325.JPG (taken 2021/01/01 05:23:11 +01:00)
+	DSCF1234.JPG (taken 2020/08/27 11:00:00 +01:00)
 
 You can run a command such as the following:
 
@@ -37,23 +40,22 @@ Your files will then be organised as follows:
 
 	2020/
 		02/
-			2020.08.27_11.00.00_b46976ab6907346a_DSCF1234.JPG
+			2020.08.27_11.00.00+0100_b46976ab6907346a_DSCF1234.JPG
 	2021/
 		01/
-			2020.01.01-05.23.11_66f4c6bbab77a615_DSCF4325.JPG
+			2020.01.01-05.23.11+0100_66f4c6bbab77a615_DSCF4325.JPG
 
 The creation date and time will be taken from the EXIF data. When no EXIF data is
 available, such as with videos, the file's modification time will be used.
 
 Caveats:
 
-1. Please note that if your photo/video has no EXIF data, and you've e.g. made a copy of
-the file so its modification time is not the time it was taken, fotografiska cannot
-correctly organise your photos into correct dates and times.
+1. Please note that if your photo/video has no EXIF data, and you've e.g. made a
+copy of the file so its modification time is not the time it was taken,
+fotografiska cannot correctly organise your photos into correct dates and times.
 
-2. Always make a backup of your photos/videos before using fotografiska. It's been
-reasonably tested, but you probably don't want to lose your photos, so copy them to a
-separate folder first just to be safe.
+2. Always make a backup of your photos/videos before using fotografiska. It's
+been reasonably tested, but it's best to be safe.
 `;
 
 
@@ -138,7 +140,7 @@ func getSortedDestination(path string, dstBaseDir string) string {
 
 	dstPath := fmt.Sprintf("%s%d/%.2d/%s-%s-%s",
 		dstBaseDir, t.Year(), t.Month(),
-		t.Format("2006.01.02_15.04.05"),
+		t.Format("2006.01.02_15.04.05-0700"),
 		hash,
 		filename)
 
@@ -252,10 +254,15 @@ func main() {
 	srcDir := validateDir(*srcDirArg)
 	dstBaseDir := validateDir(*dstDirArg)
 
-	paths, err := filepath.Glob(srcDir + "*")
+	paths, err := filepath.Glob(srcDir + "**/*")
 	if err != nil { panic(err) }
 
 	for idx, path := range paths {
+		fileinfo, err := os.Stat(path)
+		if err != nil { panic(err) }
+		if fileinfo.IsDir() {
+			continue
+		}
 		fmt.Printf("[%.2d/%.2d] %s\n", idx + 1, len(paths), filepath.Base(path))
 		sortFileIntoDestination(path, dstBaseDir, *dryRunArg)
 	}
