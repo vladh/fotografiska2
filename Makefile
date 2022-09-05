@@ -1,6 +1,6 @@
 .PHONY: install
 
-fotografiska:
+fotografiska: *.go
 	go build -o fotografiska .
 
 install: fotografiska

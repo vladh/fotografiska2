@@ -257,8 +257,13 @@ func main() {
 	srcDir := validateDir(*srcDirArg)
 	dstBaseDir := validateDir(*dstDirArg)
 
-	paths, err := filepath.Glob(srcDir + "**/*")
+	direct_paths, err := filepath.Glob(srcDir + "*")
 	if err != nil { panic(err) }
+
+	more_paths, err := filepath.Glob(srcDir + "**/*")
+	if err != nil { panic(err) }
+
+	paths := append(direct_paths, more_paths...)
 
 	for idx, path := range paths {
 		fileinfo, err := os.Stat(path)
