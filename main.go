@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -62,7 +63,44 @@ been reasonably tested, but it's best to be safe.
 `;
 
 
-func getExifCreationTime(path string) (time.Time, error) {
+type filenameInfo struct {
+	year string
+	month string
+	day string
+	hour string
+	minutes string
+	seconds string
+	tzoffset string
+	hash string
+	origFilename string
+}
+
+type timeSrc string
+
+const (
+	TIMESRC_EXIF timeSrc = "exif"
+	TIMESRC_EXIF_NO_TZ timeSrc = "exif_no_tz"
+	TIMESRC_FILENAME timeSrc = "filename"
+	TIMESRC_CTIME timeSrc = "ctime"
+)
+
+// 2021.01.29_17.17.31_60132e3223bcaafe_IMG_E8373.JPG
+var rOldFullFilename = regexp.MustCompile(`(\d\d\d\d)\.(\d\d)\.(\d\d)_(\d\d)\.(\d\d)\.(\d\d)_([0-9a-f]+)_(.*)`)
+// 2008.05.17-12.52.06_IMG_3761 (1).jpeg
+var rOldPlainFilename = regexp.MustCompile(`(\d\d\d\d)\.(\d\d)\.(\d\d)-(\d\d)\.(\d\d)\.(\d\d)_(.*)`)
+// 2022.07.06_14.21.40+0000-c273bdc6833b42d7-DSCF0033.JPG.xmp
+var rFilename = regexp.MustCompile(`(\d\d\d\d)\.(\d\d)\.(\d\d)_(\d\d)\.(\d\d)\.(\d\d)([+-]\d\d\d\d)-([0-9a-f]+)-(.*)`)
+
+
+func boolAsYn(b bool) string {
+	if b {
+		return "y"
+	}
+	return "n"
+}
+
+
+func getExifCreationTime(path string) (time.Time, bool, error) {
 	f, err := os.Open(path)
 	defer f.Close()
 	if err != nil { panic(err) }
@@ -73,7 +111,7 @@ func getExifCreationTime(path string) (time.Time, error) {
 	rawExif, err := exif.SearchAndExtractExif(data)
 	if err != nil {
 		if err == exif.ErrNoExif {
-			return time.Time{}, err
+			return time.Time{}, false, err
 		}
 		panic(err)
 	}
@@ -91,14 +129,15 @@ func getExifCreationTime(path string) (time.Time, error) {
 		}
 	}
 	if dtStr == "" {
-		return time.Time{}, fmt.Errorf("[%s] No DateTimeOriginal tag in EXIF data, perhaps it is named differently?", path)
+		return time.Time{}, false, fmt.Errorf("[%s] No DateTimeOriginal tag in EXIF data, perhaps it is named differently?", path)
 	}
 
 	if offsetStr == "" {
-		fmt.Printf("\tWARNING: Got DateTimeOriginal but no OffsetTimeOriginal, time will be UTC\n")
-		return time.Parse("2006:01:02 15:04:05", dtStr)
+		t, err := time.Parse("2006:01:02 15:04:05", dtStr)
+		return t, false, err
 	} else {
-		return time.Parse("2006:01:02 15:04:05-07:00", dtStr + offsetStr)
+		t, err := time.Parse("2006:01:02 15:04:05-07:00", dtStr + offsetStr)
+		return t, true, err
 	}
 }
 
@@ -111,12 +150,75 @@ func getFileCtime(path string) time.Time {
 }
 
 
-func getPhotoCreationTime(path string) (time.Time, error) {
-	exifTime, err := getExifCreationTime(path)
-	if err == nil {
-		return exifTime, nil
+func getFilenameAdditionalInfo(path string) filenameInfo {
+	groups := rOldFullFilename.FindStringSubmatch(path)
+	if len(groups) > 0 {
+		return filenameInfo{
+			year: groups[1],
+			month: groups[2],
+			day: groups[3],
+			hour: groups[4],
+			minutes: groups[5],
+			seconds: groups[6],
+			hash: groups[7],
+			origFilename: groups[8],
+		}
 	}
-	return getFileCtime(path), nil
+
+	groups = rOldPlainFilename.FindStringSubmatch(path)
+	if len(groups) > 0 {
+		return filenameInfo{
+			year: groups[1],
+			month: groups[2],
+			day: groups[3],
+			hour: groups[4],
+			minutes: groups[5],
+			seconds: groups[6],
+			origFilename: groups[7],
+		}
+	}
+
+	groups = rFilename.FindStringSubmatch(path)
+	if len(groups) > 0 {
+		return filenameInfo{
+			year: groups[1],
+			month: groups[2],
+			day: groups[3],
+			hour: groups[4],
+			minutes: groups[5],
+			seconds: groups[6],
+			tzoffset: groups[7],
+			hash: groups[8],
+			origFilename: groups[9],
+		}
+	}
+
+	return filenameInfo{}
+}
+
+
+func getPhotoCreationTime(path string, ai filenameInfo) (time.Time, timeSrc, error) {
+	exifTime, haveTz, err := getExifCreationTime(path)
+	if err == nil {
+		if haveTz {
+			return exifTime, TIMESRC_EXIF, nil
+		} else {
+			return exifTime, TIMESRC_EXIF_NO_TZ, nil
+		}
+	}
+
+	if len(ai.origFilename) > 0 {
+		format := "2006.01.02_15.04.05"
+		if len(ai.tzoffset) > 0 {
+			format = "2006.01.02_15.04.05-0700"
+		}
+		datestr := fmt.Sprintf("%s.%s.%s_%s.%s.%s%s",
+			ai.year, ai.month, ai.day, ai.hour, ai.minutes, ai.seconds, ai.tzoffset)
+		t, err := time.Parse(format, datestr)
+		return t, TIMESRC_FILENAME, err
+	}
+
+	return getFileCtime(path), TIMESRC_CTIME, nil
 }
 
 
@@ -133,13 +235,18 @@ func getPhotoHash(path string) string {
 }
 
 
-func getSortedDestination(path string, dstBaseDir string) string {
-	t, err := getPhotoCreationTime(path)
+func getSortedDestination(path string, dstBaseDir string) (string, timeSrc) {
+	additionalInfo := getFilenameAdditionalInfo(filepath.Base(path))
+
+	t, tSrc, err := getPhotoCreationTime(path, additionalInfo)
 	if err != nil { panic(err) }
 
 	hash := getPhotoHash(path)
 
 	filename := filepath.Base(path)
+	if len(additionalInfo.origFilename) > 0 {
+		filename = additionalInfo.origFilename
+	}
 
 	dstPath := fmt.Sprintf("%s%d/%.2d/%s-%s-%s",
 		dstBaseDir, t.Year(), t.Month(),
@@ -147,7 +254,7 @@ func getSortedDestination(path string, dstBaseDir string) string {
 		hash,
 		filename)
 
-	return dstPath
+	return dstPath, tSrc
 }
 
 
@@ -202,31 +309,35 @@ func validateFile(path string) bool {
 }
 
 
-func sortFileIntoDestination(path string, dstBaseDir string, dryRun bool) {
-	dstPath := getSortedDestination(path, dstBaseDir)
+func sortFileIntoDestination(path string, dstBaseDir string, dryRun bool, idx int, nFiles int) {
+	dstPath, timeSrc := getSortedDestination(path, dstBaseDir)
 	makeDestinationDirs(dstPath)
 
-	shouldWriteFile := false
+	var bytesCopied int64
+	var doesDestExist bool
+	var isDestInvalid bool
+
 	if _, err := os.Stat(dstPath); err == nil {
-		if validateFile(dstPath) {
-			fmt.Printf("\tDestination file already exists, doing nothing: %s\n", dstPath)
-		} else {
-			fmt.Printf("\tDestination file already exists but did not match its own hash, deleting\n")
+		doesDestExist = true
+		if !validateFile(dstPath) {
+			isDestInvalid = true
 			err := os.Remove(dstPath)
 			if err != nil { panic(err) }
-			shouldWriteFile = true
 		}
-	} else {
-		shouldWriteFile = true
 	}
 
-	if shouldWriteFile {
-		var bytesCopied int64 = 0
-		if !dryRun {
-			bytesCopied = copyFile(path, dstPath)
-		}
-		fmt.Printf("\t→ %s (%d bytes copied)\n", dstPath, bytesCopied)
+	if !dryRun && (!doesDestExist || isDestInvalid) {
+		bytesCopied = copyFile(path, dstPath)
 	}
+
+	var dryRunStr string
+	if dryRun {
+		dryRunStr = "(dry run) "
+	}
+
+	fmt.Printf("%s[%.2d/%.2d] (exists? %s) (invalid? %s) (wrote %db) (time from %10s) %s  ->  %s\n",
+		dryRunStr, idx, nFiles, boolAsYn(doesDestExist), boolAsYn(isDestInvalid),
+		bytesCopied, timeSrc, filepath.Base(path), dstPath)
 }
 
 
@@ -257,22 +368,24 @@ func main() {
 	srcDir := validateDir(*srcDirArg)
 	dstBaseDir := validateDir(*dstDirArg)
 
-	direct_paths, err := filepath.Glob(srcDir + "*")
-	if err != nil { panic(err) }
-
-	more_paths, err := filepath.Glob(srcDir + "**/*")
-	if err != nil { panic(err) }
-
-	paths := append(direct_paths, more_paths...)
-
-	for idx, path := range paths {
-		fileinfo, err := os.Stat(path)
-		if err != nil { panic(err) }
-		if fileinfo.IsDir() {
-			continue
+	nFiles := 0
+	err := filepath.Walk(srcDir, func(path string, fileinfo os.FileInfo, err error) error {
+		if !fileinfo.IsDir() {
+			nFiles += 1
 		}
-		fmt.Printf("[%.2d/%.2d] %s\n", idx + 1, len(paths), filepath.Base(path))
-		sortFileIntoDestination(path, dstBaseDir, *dryRunArg)
-	}
+		return nil
+	})
+	if err != nil { panic(err) }
+
+	var idx int
+	err = filepath.Walk(srcDir, func(path string, fileinfo os.FileInfo, err error) error {
+		if fileinfo.IsDir() {
+			return nil
+		}
+		idx += 1
+		sortFileIntoDestination(path, dstBaseDir, *dryRunArg, idx, nFiles)
+		return nil
+	})
+	if err != nil { panic(err) }
 }
 
