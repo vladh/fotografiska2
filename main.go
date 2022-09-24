@@ -19,7 +19,6 @@ import (
 )
 
 
-const MAX_HASHABLE_SIZE_IN_BYTES = 10485760 // 10 MB
 const USAGE = `
 fotografiska organises your photos/videos into a certain directory structure
 that is easy to browse with a regular file manager.
@@ -91,12 +90,31 @@ var rOldPlainFilename = regexp.MustCompile(`(\d\d\d\d)\.(\d\d)\.(\d\d)-(\d\d)\.(
 // 2022.07.06_14.21.40+0000-c273bdc6833b42d7-DSCF0033.JPG.xmp
 var rFilename = regexp.MustCompile(`(\d\d\d\d)\.(\d\d)\.(\d\d)_(\d\d)\.(\d\d)\.(\d\d)([+-]\d\d\d\d)-([0-9a-f]+)-(.*)`)
 
+const MAX_HASHABLE_SIZE_IN_BYTES = 10485760 // 10 MB
+var MEDIA_EXTENSIONS = []string{
+	".jpg", ".jpeg", ".jpe", ".jif", ".jfif",
+	".png",
+	".tif", ".tiff",
+	".heic", ".heics", ".heif", ".heifs",
+}
+
 
 func boolAsYn(b bool) string {
 	if b {
 		return "y"
 	}
 	return "n"
+}
+
+
+func isMedia(filename string) bool {
+	filename = strings.ToLower(filename)
+	for _, ext := range MEDIA_EXTENSIONS {
+		if strings.HasSuffix(filename, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 
@@ -237,24 +255,36 @@ func getPhotoHash(path string) string {
 
 func getSortedDestination(path string, dstBaseDir string) (string, timeSrc) {
 	additionalInfo := getFilenameAdditionalInfo(filepath.Base(path))
-
 	t, tSrc, err := getPhotoCreationTime(path, additionalInfo)
 	if err != nil { panic(err) }
 
-	hash := getPhotoHash(path)
-
 	filename := filepath.Base(path)
-	if len(additionalInfo.origFilename) > 0 {
-		filename = additionalInfo.origFilename
+
+	if isMedia(path) {
+		hash := getPhotoHash(path)
+
+		if len(additionalInfo.origFilename) > 0 {
+			filename = additionalInfo.origFilename
+		}
+
+		dstPath := fmt.Sprintf("%s%d/%.2d/%s-%s-%s",
+			dstBaseDir, t.Year(), t.Month(),
+			t.Format("2006.01.02_15.04.05-0700"),
+			hash,
+			filename)
+		return dstPath, tSrc
+	} else {
+		// For things that are not images or videos, we do all the usual stuff,
+		// except that we leave the actual filename as-is. The reason is that
+		// the filename of non-media files, such as .xmp files, often contain the
+		// filename of acutal media, so for example <image-name>.xmp.
+		// Therefore, the hash of the non-media file will actually be a hash
+		// of the image it refers to, so it doesn't make sense for us to compute
+		// a hash of the non-media file and put it in its filename.
+		dstPath := fmt.Sprintf("%s%d/%.2d/%s",
+			dstBaseDir, t.Year(), t.Month(), filename)
+		return dstPath, TIMESRC_FILENAME
 	}
-
-	dstPath := fmt.Sprintf("%s%d/%.2d/%s-%s-%s",
-		dstBaseDir, t.Year(), t.Month(),
-		t.Format("2006.01.02_15.04.05-0700"),
-		hash,
-		filename)
-
-	return dstPath, tSrc
 }
 
 
