@@ -335,7 +335,7 @@ func sortFileIntoDestination(path string, dstBaseDir string, dryRun bool, idx in
 		dryRunStr = "(dry run) "
 	}
 
-	fmt.Printf("%s[%.2d/%.2d] (exists? %s) (invalid? %s) (wrote %db) (time from %10s) %s  ->  %s\n",
+	fmt.Printf("%s[%4d/%4d] (exists? %s) (invalid? %s) (wrote %8db) (time from %10s) %s  ->  %s\n",
 		dryRunStr, idx, nFiles, boolAsYn(doesDestExist), boolAsYn(isDestInvalid),
 		bytesCopied, timeSrc, filepath.Base(path), dstPath)
 }
