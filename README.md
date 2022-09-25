@@ -33,10 +33,10 @@ Your files will then be organised as follows:
 
 	2020/
 		02/
-			2020.08.27_11.00.00+0100_b46976ab6907346a_DSCF1234.JPG
+			2020.08.27_11.00.00+0100-b46976ab6907346a-DSCF1234.JPG
 	2021/
 		01/
-			2020.01.01-05.23.11+0100_66f4c6bbab77a615_DSCF4325.JPG
+			2020.01.01-05.23.11+0100-66f4c6bbab77a615-DSCF4325.JPG
 
 The creation date and time will be taken from the EXIF data. When no EXIF data is
 available, such as with videos, the file's modification time will be used.
