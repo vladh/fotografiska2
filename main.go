@@ -91,11 +91,14 @@ var rOldPlainFilename = regexp.MustCompile(`(\d\d\d\d)\.(\d\d)\.(\d\d)-(\d\d)\.(
 var rFilename = regexp.MustCompile(`(\d\d\d\d)\.(\d\d)\.(\d\d)_(\d\d)\.(\d\d)\.(\d\d)([+-]\d\d\d\d)-([0-9a-f]+)-(.*)`)
 
 const MAX_HASHABLE_SIZE_IN_BYTES = 10485760 // 10 MB
-var MEDIA_EXTENSIONS = []string{
+var EXIF_EXTENSIONS = []string{
 	".jpg", ".jpeg", ".jpe", ".jif", ".jfif",
 	".png",
 	".tif", ".tiff",
 	".heic", ".heics", ".heif", ".heifs",
+}
+var NON_MEDIA_EXTENSIONS = []string{
+	".xmp",
 }
 
 
@@ -107,14 +110,25 @@ func boolAsYn(b bool) string {
 }
 
 
-func isMedia(filename string) bool {
+func couldHaveExif(filename string) bool {
 	filename = strings.ToLower(filename)
-	for _, ext := range MEDIA_EXTENSIONS {
+	for _, ext := range EXIF_EXTENSIONS {
 		if strings.HasSuffix(filename, ext) {
 			return true
 		}
 	}
 	return false
+}
+
+
+func isMedia(filename string) bool {
+	filename = strings.ToLower(filename)
+	for _, ext := range NON_MEDIA_EXTENSIONS {
+		if strings.HasSuffix(filename, ext) {
+			return false
+		}
+	}
+	return true
 }
 
 
@@ -125,14 +139,13 @@ func getExifCreationTime(path string) (time.Time, bool, error) {
 
 	rawExif, err := exif.SearchAndExtractExifWithReader(f)
 	if err != nil {
-		if err == exif.ErrNoExif {
-			return time.Time{}, false, err
-		}
-		panic(err)
+		return time.Time{}, false, err
 	}
 
 	entries, _, err := exif.GetFlatExifData(rawExif, nil)
-	if err != nil { panic(err) }
+	if err != nil {
+		return time.Time{}, false, err
+	}
 
 	var dtStr, offsetStr string
 	for _, entry := range entries {
@@ -213,7 +226,7 @@ func getFilenameAdditionalInfo(path string) filenameInfo {
 
 
 func getPhotoCreationTime(path string, ai filenameInfo) (time.Time, timeSrc, error) {
-	if isMedia(path) {
+	if couldHaveExif(path) {
 		exifTime, haveTz, err := getExifCreationTime(path)
 		if err == nil {
 			if haveTz {
@@ -327,11 +340,13 @@ func copyFile(srcPath string, dstPath string) int64 {
 func validateFile(path string) bool {
 	parts := strings.Split(filepath.Base(path), "-")
 	if len(parts) < 3 {
-		panic(fmt.Sprintf("Expected filename to split by '-' into at least 3 parts, but found %d parts: %s", len(parts), path))
+		fmt.Errorf("Expected filename to split by '-' into at least 3 parts, but found %d parts: %s", len(parts), path)
+		return true
 	}
 	hash := parts[1]
 	if len(hash) != 16 {
-		panic(fmt.Sprintf("Expected the following to be a length 16 hash but it wasn't: %s\nFull path was: %s", hash, path))
+		fmt.Errorf("Expected the following to be a length 16 hash but it wasn't: %s\nFull path was: %s", hash, path)
+		return true
 	}
 	correctHash := getPhotoHash(path)
 	return hash == correctHash
@@ -348,7 +363,11 @@ func sortFileIntoDestination(path string, dstBaseDir string, dryRun bool, idx in
 
 	if _, err := os.Stat(dstPath); err == nil {
 		doesDestExist = true
-		if !validateFile(dstPath) {
+		// We only expect media files to conform to the hash filename format.
+		// There is a hashless format for non-media files, and there might be
+		// other formats for other things in the future. The downside to this
+		// is that we cannot validate the integrity of non-media files.
+		if isMedia(dstPath) && !validateFile(dstPath) {
 			isDestInvalid = true
 			err := os.Remove(dstPath)
 			if err != nil { panic(err) }
