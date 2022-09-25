@@ -120,13 +120,10 @@ func isMedia(filename string) bool {
 
 func getExifCreationTime(path string) (time.Time, bool, error) {
 	f, err := os.Open(path)
+	if err != nil { panic(err) }
 	defer f.Close()
-	if err != nil { panic(err) }
 
-	data, err := io.ReadAll(f)
-	if err != nil { panic(err) }
-
-	rawExif, err := exif.SearchAndExtractExif(data)
+	rawExif, err := exif.SearchAndExtractExifWithReader(f)
 	if err != nil {
 		if err == exif.ErrNoExif {
 			return time.Time{}, false, err
@@ -216,12 +213,14 @@ func getFilenameAdditionalInfo(path string) filenameInfo {
 
 
 func getPhotoCreationTime(path string, ai filenameInfo) (time.Time, timeSrc, error) {
-	exifTime, haveTz, err := getExifCreationTime(path)
-	if err == nil {
-		if haveTz {
-			return exifTime, TIMESRC_EXIF, nil
-		} else {
-			return exifTime, TIMESRC_EXIF_NO_TZ, nil
+	if isMedia(path) {
+		exifTime, haveTz, err := getExifCreationTime(path)
+		if err == nil {
+			if haveTz {
+				return exifTime, TIMESRC_EXIF, nil
+			} else {
+				return exifTime, TIMESRC_EXIF_NO_TZ, nil
+			}
 		}
 	}
 
@@ -365,13 +364,16 @@ func sortFileIntoDestination(path string, dstBaseDir string, dryRun bool, idx in
 		dryRunStr = "(dry run) "
 	}
 
-	fmt.Printf("%s[%4d/%4d] (exists? %s) (invalid? %s) (wrote %8db) (time from %10s) %s  ->  %s\n",
-		dryRunStr, idx, nFiles, boolAsYn(doesDestExist), boolAsYn(isDestInvalid),
+	fmt.Printf("%s[%4d/%4d] (exists? %s) (media? %s) (invalid? %s) (wrote %8db) (time from %10s) %s  ->  %s\n",
+		dryRunStr, idx, nFiles,
+		boolAsYn(doesDestExist), boolAsYn(isMedia(filepath.Base(path))), boolAsYn(isDestInvalid),
 		bytesCopied, timeSrc, filepath.Base(path), dstPath)
 }
 
 
 func main() {
+	var err error
+
 	srcDirArg := flag.String("srcDir", "", "a folder containing images/videos to read (mandatory)")
 	dstDirArg := flag.String("dstDir", "", "a folder to move the images/videos into (mandatory)")
 	dryRunArg := flag.Bool("dryRun", false, "if true, don't actually move any files, just print out what would be done")
@@ -399,7 +401,7 @@ func main() {
 	dstBaseDir := validateDir(*dstDirArg)
 
 	nFiles := 0
-	err := filepath.Walk(srcDir, func(path string, fileinfo os.FileInfo, err error) error {
+	err = filepath.Walk(srcDir, func(path string, fileinfo os.FileInfo, err error) error {
 		if !fileinfo.IsDir() {
 			nFiles += 1
 		}
