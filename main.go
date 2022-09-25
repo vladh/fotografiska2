@@ -174,7 +174,13 @@ func getFileCtime(path string) time.Time {
 	fi, err := os.Stat(path)
 	if err != nil { panic(err) }
 	stat := fi.Sys().(*syscall.Stat_t)
-	return time.Unix(int64(stat.Ctim.Sec), int64(stat.Ctim.Nsec))
+	ctim := time.Unix(int64(stat.Ctim.Sec), int64(stat.Ctim.Nsec))
+	mtim := time.Unix(int64(stat.Mtim.Sec), int64(stat.Mtim.Nsec))
+	if (ctim.Before(mtim)) {
+		return ctim
+	} else {
+		return mtim
+	}
 }
 
 
