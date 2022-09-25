@@ -6,8 +6,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -328,18 +328,13 @@ func validateDir(dirPath string) string {
 
 
 func copyFile(srcPath string, dstPath string) int64 {
-	srcFile, err := os.Open(srcPath)
-	if err != nil { panic(err) }
-	defer srcFile.Close()
-
-	dstFile, err := os.Create(dstPath)
-	if err != nil { panic(err) }
-	defer dstFile.Close()
-
-	bytesCopied, err := io.Copy(dstFile, srcFile)
+	cmd := exec.Command("cp", "--preserve=timestamps", srcPath, dstPath)
+	err := cmd.Run()
 	if err != nil { panic(err) }
 
-	return bytesCopied
+	filestat, err := os.Stat(dstPath)
+	if err != nil { panic(err) }
+	return filestat.Size()
 }
 
 
