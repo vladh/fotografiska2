@@ -165,6 +165,10 @@ func getExifCreationTime(path string) (time.Time, bool, error) {
 		return t, false, err
 	} else {
 		t, err := time.Parse("2006:01:02 15:04:05-07:00", dtStr + offsetStr)
+		if err != nil {
+			t, err := time.Parse("2006:01:02 15:04:05Z", dtStr + offsetStr)
+			return t, true, err
+		}
 		return t, true, err
 	}
 }
@@ -176,10 +180,18 @@ func getFileCtime(path string) time.Time {
 	stat := fi.Sys().(*syscall.Stat_t)
 	ctim := time.Unix(int64(stat.Ctim.Sec), int64(stat.Ctim.Nsec))
 	mtim := time.Unix(int64(stat.Mtim.Sec), int64(stat.Mtim.Nsec))
-	if (ctim.Before(mtim)) {
-		return ctim
+	if stat.Ctim.Sec == 0 && stat.Ctim.Nsec == 0 {
+		if stat.Mtim.Sec == 0 && stat.Mtim.Nsec == 0 {
+			return time.Now()
+		} else {
+			return mtim
+		}
 	} else {
-		return mtim
+		if (ctim.Before(mtim)) {
+			return ctim
+		} else {
+			return mtim
+		}
 	}
 }
 
@@ -234,6 +246,9 @@ func getFilenameAdditionalInfo(path string) filenameInfo {
 func getPhotoCreationTime(path string, ai filenameInfo) (time.Time, timeSrc, error) {
 	if couldHaveExif(path) {
 		exifTime, haveTz, err := getExifCreationTime(path)
+		if err != nil {
+			fmt.Println(err)
+		}
 		if err == nil {
 			if haveTz {
 				return exifTime, TIMESRC_EXIF, nil
